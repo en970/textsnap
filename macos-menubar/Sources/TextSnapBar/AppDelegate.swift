@@ -53,58 +53,111 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Reads the just-captured image straight off our own pasteboard and hands textsnap a
+    /// file path instead of letting it re-read the clipboard itself. textsnap's clipboard-read
+    /// path goes through Pillow's `ImageGrab.grabclipboard()`, which on macOS shells out to
+    /// `osascript` and triggers a separate Automation permission prompt. Reading NSPasteboard
+    /// directly needs no extra permission beyond the one-time Screen Recording grant that
+    /// `screencapture` itself requires.
     private func beginProcessing() {
+        guard let tiffData = NSPasteboard.general.data(forType: .tiff) else {
+            isBusy = false
+            updateIcon(.idle)
+            notify(title: "textsnap", subtitle: nil, message: "No image found on the clipboard.")
+            return
+        }
+
         updateIcon(.processing)
         startPulse()
         showHUD(state: .processing)
 
         guard let path = resolveTextsnapExecutable() else {
-            finishProcessing(success: false, message: "textsnap command not found on PATH.")
+            finishProcessing(success: false, message: "textsnap command not found.", outputPath: nil)
+            return
+        }
+
+        let workDir = NSTemporaryDirectory() + "textsnap-menubar/"
+        try? FileManager.default.createDirectory(atPath: workDir, withIntermediateDirectories: true)
+        let inputPath = workDir + "capture.tiff"
+        let outputPath = workDir + "capture.txt"
+        try? FileManager.default.removeItem(atPath: outputPath)
+
+        do {
+            try tiffData.write(to: URL(fileURLWithPath: inputPath))
+        } catch {
+            finishProcessing(success: false, message: "Couldn't save the capture to disk.", outputPath: nil)
             return
         }
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: path)
-        proc.arguments = []
+        proc.arguments = [inputPath, "-o", outputPath, "--plaintext", "-v"]
+        proc.standardOutput = FileHandle.nullDevice
+
         let stderrPipe = Pipe()
         proc.standardError = stderrPipe
-        proc.standardOutput = Pipe()
+        var stderrBuffer = Data()
+        stderrPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
+            let chunk = handle.availableData
+            guard !chunk.isEmpty else { return }
+            stderrBuffer.append(chunk)
+            if let line = String(data: chunk, encoding: .utf8) {
+                DispatchQueue.main.async {
+                    self?.hud?.updateProgress(line)
+                }
+            }
+        }
 
         proc.terminationHandler = { [weak self] p in
-            let errData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-            let errText = String(data: errData, encoding: .utf8) ?? ""
+            stderrPipe.fileHandleForReading.readabilityHandler = nil
+            let errText = String(data: stderrBuffer, encoding: .utf8) ?? ""
             DispatchQueue.main.async {
-                self?.finishProcessing(success: p.terminationStatus == 0, message: errText)
+                self?.finishProcessing(success: p.terminationStatus == 0, message: errText, outputPath: outputPath)
             }
         }
 
         do {
             try proc.run()
         } catch {
-            finishProcessing(success: false, message: "\(error)")
+            stderrPipe.fileHandleForReading.readabilityHandler = nil
+            finishProcessing(success: false, message: "\(error)", outputPath: nil)
         }
     }
 
-    private func finishProcessing(success: Bool, message: String) {
+    private func finishProcessing(success: Bool, message: String, outputPath: String?) {
         stopPulse()
         isBusy = false
 
-        if success {
+        if success, let outputPath, let text = try? String(contentsOfFile: outputPath, encoding: .utf8),
+            !text.isEmpty {
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
             updateIcon(.success)
             showHUD(state: .success)
-            let preview = NSPasteboard.general.string(forType: .string).map(oneLinePreview)
-            notify(title: "textsnap", subtitle: preview, message: "Copied to clipboard")
+            notify(title: "textsnap", subtitle: oneLinePreview(text), message: "Copied to clipboard")
         } else {
             updateIcon(.failure)
             showHUD(state: .failure)
-            let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmed = lastMeaningfulLine(message)
             notify(title: "textsnap", subtitle: nil, message: trimmed.isEmpty ? "Recognition failed." : trimmed)
+        }
+
+        if let outputPath {
+            try? FileManager.default.removeItem(atPath: outputPath)
+            try? FileManager.default.removeItem(
+                atPath: (outputPath as NSString).deletingLastPathComponent + "/capture.tiff")
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { [weak self] in
             self?.updateIcon(.idle)
             self?.hud?.hide()
         }
+    }
+
+    private func lastMeaningfulLine(_ text: String) -> String {
+        text.split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .last { !$0.isEmpty } ?? ""
     }
 
     private func oneLinePreview(_ s: String) -> String {

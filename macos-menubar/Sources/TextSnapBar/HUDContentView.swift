@@ -2,6 +2,7 @@ import SwiftUI
 
 final class HUDStateHolder: ObservableObject {
     @Published var state: HUDContentView.HUDState = .processing
+    @Published var progressText: String = ""
 }
 
 struct HUDContentView: View {
@@ -21,7 +22,7 @@ struct HUDContentView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
 
             RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
 
             HStack(spacing: 10) {
                 icon
@@ -33,9 +34,7 @@ struct HUDContentView: View {
                     Text(title)
                         .font(.system(size: 13, weight: .semibold, design: .rounded))
                         .foregroundStyle(.white)
-                    if state == .processing {
-                        dots
-                    }
+                    secondaryLine
                 }
                 Spacer(minLength: 0)
             }
@@ -66,11 +65,26 @@ struct HUDContentView: View {
         }
     }
 
+    @ViewBuilder
+    private var secondaryLine: some View {
+        if state == .processing {
+            if stateHolder.progressText.isEmpty {
+                dots
+            } else {
+                Text(stateHolder.progressText)
+                    .font(.system(size: 10, weight: .regular, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.65))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+    }
+
     private var dots: some View {
         HStack(spacing: 3) {
             ForEach(0..<3, id: \.self) { i in
                 Circle()
-                    .fill(Color.white.opacity(0.85))
+                    .fill(Color.white.opacity(0.75))
                     .frame(width: 4, height: 4)
                     .opacity(pulse ? 1 : 0.3)
                     .animation(

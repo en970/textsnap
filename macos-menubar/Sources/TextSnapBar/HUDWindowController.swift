@@ -7,6 +7,7 @@ final class HUDWindowController {
 
     func show(state: HUDContentView.HUDState, anchorFrame: NSRect) {
         stateHolder.state = state
+        stateHolder.progressText = ""
 
         if panel == nil {
             let size = HUDContentView.size
@@ -40,6 +41,18 @@ final class HUDWindowController {
             ctx.duration = 0.18
             panel.animator().alphaValue = 1
         }
+    }
+
+    /// Surfaces textsnap's `-v` stderr lines so the HUD reads as live progress instead of a
+    /// static "Reading text" that looks stuck during the (occasionally slow) first run.
+    func updateProgress(_ rawLine: String) {
+        let cleaned = rawLine
+            .split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .last { !$0.isEmpty }?
+            .replacingOccurrences(of: "[textsnap] ", with: "")
+        guard let cleaned, !cleaned.isEmpty else { return }
+        stateHolder.progressText = cleaned
     }
 
     func hide() {
