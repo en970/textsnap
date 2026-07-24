@@ -262,6 +262,20 @@ Together ~890 MB. To use your own copy, either point `--model-dir` at a director
 
 ---
 
+## macOS menu bar companion
+
+A small native menu bar app in [`macos-menubar/`](macos-menubar/) turns the clipboard round trip into one click: click the status bar icon, drag a selection with the system screenshot picker, and textsnap runs in the background and copies the recognized text back to your clipboard — with a notification when it's done.
+
+```
+cd macos-menubar
+./build_app.sh
+open TextSnapBar.app
+```
+
+Requires `textsnap` to already be installed (`pip install textsnap`) and on your `PATH`. The first capture will prompt for Screen Recording permission in System Settings → Privacy & Security — grant it and relaunch the app.
+
+---
+
 ## License
 
 MIT for this project — see [LICENSE](LICENSE).
