@@ -43,6 +43,24 @@ cat > "$APP_DIR/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-codesign --force --deep --sign - "$APP_DIR"
+# Ad-hoc signing (`--sign -`) derives its identity from the binary's hash, so it changes on
+# every rebuild -- macOS then treats each build as a brand new app and re-prompts for Screen
+# Recording every time. Signing with a real local identity keeps that identity stable across
+# rebuilds, so permission grants persist. Prefer a local "Apple Development" identity (what
+# Xcode uses for on-device/local runs) if one is available; fall back to ad-hoc otherwise.
+IDENTITY=$(security find-identity -v -p codesigning 2>/dev/null \
+    | grep -m1 "Apple Development" \
+    | sed -E 's/^[[:space:]]*[0-9]+\) [A-F0-9]+ "(.*)"$/\1/')
+
+if [ -z "$IDENTITY" ]; then
+    IDENTITY="-"
+    echo "No local 'Apple Development' signing identity found in Keychain -- falling back to ad-hoc signing."
+    echo "Ad-hoc identities change on every rebuild, so macOS will re-prompt for Screen Recording each time."
+    echo "Open Xcode once (any project) to get a free local 'Apple Development' identity, then rebuild."
+else
+    echo "Signing with local identity: $IDENTITY"
+fi
+
+codesign --force --deep --sign "$IDENTITY" "$APP_DIR"
 
 echo "Built $APP_DIR"
